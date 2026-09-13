@@ -22,6 +22,15 @@ check_language(CUDA)
 # easier to figure out what came from where in the logs.
 set(MSG_PREFIX "[qsim cmake configuration]")
 
+# Opt-in for wheel builds only: link the GPU modules (and qsim_decide) with a
+# relocatable $ORIGIN RPATH that resolves to the NVIDIA pip wheels installed
+# next to qsimcirq. cibuildwheel enables it with CMAKE_ARGS=-DQSIM_WHEEL_RPATH=ON
+# and local builds leave it OFF; see pybind_interface/cmake/qsim_wheel_rpath.cmake.
+option(QSIM_WHEEL_RPATH
+       "Link GPU modules with a relocatable RPATH for the NVIDIA pip wheels"
+       OFF)
+include(pybind_interface/cmake/qsim_wheel_rpath.cmake)
+
 # CMake normally sets CMAKE_APPLE_SILICON_PROCESSOR on Apple Silicon; however,
 # it doesn't happen when running builds using cibuildwheel, even on Apple
 # Silicon. We have had better luck checking and seting it ourselves.
@@ -35,9 +44,21 @@ else()
 endif()
 
 if(CMAKE_CUDA_COMPILER)
+    # Link the CUDA runtime dynamically (NEEDED libcudart.so.12) rather than
+    # CMake's default libcudart_static.a, so that the wheels can pick up the
+    # runtime from the nvidia-cuda-runtime-cu12 package and local builds use the
+    # toolkit's shared runtime. -DCMAKE_CUDA_RUNTIME_LIBRARY=Static restores the
+    # previous behaviour.
+    if(NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
+        set(CMAKE_CUDA_RUNTIME_LIBRARY Shared CACHE STRING
+            "CUDA runtime library to link against (Static, Shared or None)")
+    endif()
     enable_language(CUDA)
     message(STATUS "${MSG_PREFIX} found CUDA compiler "
                    "${CMAKE_CUDA_COMPILER} ${CMAKE_CUDA_COMPILER_VERSION}")
+    message(STATUS "${MSG_PREFIX} CUDA runtime library: "
+                   "${CMAKE_CUDA_RUNTIME_LIBRARY}")
+    message(STATUS "${MSG_PREFIX} QSIM_WHEEL_RPATH: ${QSIM_WHEEL_RPATH}")
 else()
     message(STATUS "${MSG_PREFIX} did not find CUDA compiler")
     # Did not find the CUDA framewwork, so check for the HIP as an alternative.
@@ -49,6 +70,9 @@ else()
         project(qsim LANGUAGES CXX HIP)
     else()
         message(STATUS "${MSG_PREFIX} did not find hipcc")
+    endif()
+    if(QSIM_WHEEL_RPATH)
+        message(STATUS "${MSG_PREFIX} QSIM_WHEEL_RPATH: ${QSIM_WHEEL_RPATH}")
     endif()
 endif()
 
