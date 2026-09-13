@@ -53,4 +53,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(qsim_decide PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
-# QSIM_WHEEL_RPATH is applied by pybind_interface/cmake/qsim_wheel_rpath.cmake (WP2)
+# Opt-in relocatable RPATH for wheel builds (a no-op unless QSIM_WHEEL_RPATH is
+# ON; see pybind_interface/cmake/qsim_wheel_rpath.cmake). qsim_decide dlopen()s
+# the CUDA libraries, and dlopen() searches the calling object's DT_RPATH, so it
+# needs the same entry as the GPU modules.
+qsim_apply_wheel_rpath(qsim_decide)

@@ -32,7 +32,8 @@ pip install --group dev
 ## Linux installation
 
 We provide `qsimcirq` Python wheels on 64-bit `x86` architectures with
-`Python 3.{10,11,12,13}`. The wheels include the GPU simulator modules, which
+`Python 3.{10,11,12,13}`. Starting with the first release built with GPU support
+(see qsim issue #601), the wheels include the GPU simulator modules, which
 are enabled at import time when a compatible NVIDIA driver (release 525 or
 newer, i.e. CUDA 12 capable) and the CUDA 12 runtime libraries are present;
 otherwise `qsimcirq` falls back to the CPU simulator. Nothing is compiled at

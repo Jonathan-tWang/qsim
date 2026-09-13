@@ -33,6 +33,10 @@ REASON_DRIVER_TOO_OLD = "NVIDIA driver too old for CUDA 12 (need >= 525)."
 REASON_NO_DEVICES = "No CUDA devices visible."
 REASON_NO_RUNTIME = 'CUDA runtime not installed; run: pip install "qsimcirq[cuda12]".'
 REASON_NO_CUSTATEVEC = 'cuStateVec not installed; run: pip install "qsimcirq[cuda12]".'
+# Used by QSimSimulator for gpu_mode 1/2 when the CUDA backend itself loaded.
+REASON_CUSTATEVEC_TOO_OLD = (
+    "cuStateVec too old for the Ex API (need cuStateVec >= 1.10)."
+)
 # Terminal fallback when nothing above applies (e.g. the module was unloaded
 # after import); not one of the contract strings, but never None.
 REASON_NOT_LOADED = "qsimcirq.qsim_cuda is not loaded."
@@ -155,7 +159,11 @@ def _reason(probe: Dict[str, Any], errors: Dict[str, str], qsim_decide: Any) -> 
     missing -> import error -> cuStateVec missing.
     """
     platform_name = probe.get("platform") if probe else _host_platform()
-    if platform_name != "linux" or not _is_x86_64():
+    if platform_name != "linux":
+        return REASON_PLATFORM
+    # The wheels only ship GPU modules for x86_64, but a source build on another
+    # Linux architecture (e.g. aarch64 with a driver) is diagnosed normally.
+    if not _is_x86_64() and not (probe and probe.get("driver_library_found")):
         return REASON_PLATFORM
 
     if probe:
@@ -185,3 +193,31 @@ def _reason(probe: Dict[str, Any], errors: Dict[str, str], qsim_decide: Any) -> 
             return REASON_NO_CUSTATEVEC
 
     return REASON_NOT_LOADED
+
+
+def custatevec_reason(gpu_mode: int) -> Optional[str]:
+    """Why `gpu_mode` 1 or 2 is unavailable although the CUDA backend loaded.
+
+    `GpuStatus.reason` is `None` whenever `qsimcirq.qsim_gpu` loaded (contract
+    C2), so `QSimSimulator` uses this to explain a missing cuStateVec or
+    cuStateVecEx module. Returns `None` when nothing specific can be said
+    (no probe, HIP backend, or the module is present).
+    """
+    import qsimcirq
+    from qsimcirq import qsim_decide
+
+    module = "qsim_custatevecex" if gpu_mode >= 2 else "qsim_custatevec"
+    if getattr(qsimcirq, module) is not None:
+        return None
+    probe = _run_probe(qsim_decide)
+    if probe and probe.get("hip_compiled") and not probe.get("driver_library_found"):
+        return None
+    if probe:
+        if not probe.get("cublas_found") or not probe.get("custatevec_found"):
+            return REASON_NO_CUSTATEVEC
+        if gpu_mode >= 2 and not probe.get("custatevec_ex_found"):
+            return REASON_CUSTATEVEC_TOO_OLD
+    errors = dict(getattr(qsimcirq, "_import_errors", {}))
+    if module in errors:
+        return f"qsimcirq.{module} failed to import: {errors[module].rstrip('.')}."
+    return None

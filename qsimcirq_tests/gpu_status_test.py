@@ -183,6 +183,15 @@ def test_platform_check_uses_probe_platform_and_host_arch(monkeypatch, no_gpu_mo
     assert qsimcirq.gpu_status().reason == _gpu_status.REASON_NO_DRIVER
 
 
+def test_non_x86_64_linux_with_driver_is_diagnosed_normally(
+    monkeypatch, no_gpu_modules
+):
+    """A source build on e.g. aarch64 Linux with a driver gets the real reason."""
+    monkeypatch.setattr(_gpu_status, "_is_x86_64", lambda: False)
+    _set_probe(monkeypatch, _healthy_probe(cuda_runtime_found=False))
+    assert qsimcirq.gpu_status().reason == _gpu_status.REASON_NO_RUNTIME
+
+
 def test_load_qsim_gpu_records_import_error(monkeypatch, no_gpu_modules):
     """A GPU module whose shared libraries are missing yields None, not a crash."""
     attempted = []
@@ -346,13 +355,42 @@ def test_simulator_error_includes_reason(
     assert message.endswith(" " + _gpu_status.REASON_NO_DRIVER)
 
 
-def test_simulator_error_without_reason_keeps_original_message(
+@pytest.mark.parametrize(
+    "gpu_mode, probe_overrides, import_errors, expected_suffix",
+    [
+        (1, {"custatevec_found": False}, {}, _gpu_status.REASON_NO_CUSTATEVEC),
+        (1, {"cublas_found": False}, {}, _gpu_status.REASON_NO_CUSTATEVEC),
+        (2, {"custatevec_ex_found": False}, {}, _gpu_status.REASON_CUSTATEVEC_TOO_OLD),
+        (
+            1,
+            {},
+            {"qsim_custatevec": "libcublasLt.so.12: cannot open shared object file."},
+            "qsimcirq.qsim_custatevec failed to import: "
+            "libcublasLt.so.12: cannot open shared object file.",
+        ),
+    ],
+)
+def test_simulator_error_custatevec_hint_when_cuda_available(
+    monkeypatch, linux_x86_64, gpu_mode, probe_overrides, import_errors, expected_suffix
+):
+    """gmode=1/2 with a working CUDA backend: reason is None, so a cuStateVec hint."""
+    _set_modules(monkeypatch, gpu=types.ModuleType("qsimcirq.qsim_cuda"))
+    monkeypatch.setattr(qsimcirq, "_import_errors", dict(import_errors))
+    _set_probe(monkeypatch, _healthy_probe(**probe_overrides))
+    assert qsimcirq.gpu_status().reason is None
+    options = qsimcirq.QSimOptions(use_gpu=True, gpu_mode=gpu_mode)
+    with pytest.raises(ValueError) as excinfo:
+        qsimcirq.QSimSimulator(qsim_options=options)
+    assert str(excinfo.value).endswith(" " + expected_suffix)
+
+
+def test_simulator_error_without_probe_keeps_original_message(
     monkeypatch, linux_x86_64
 ):
-    """gmode=1 with a working CUDA backend: reason is None, message unchanged."""
+    """gmode=1, CUDA backend loaded, no gpu_probe and no import error: unchanged."""
     _set_modules(monkeypatch, gpu=types.ModuleType("qsimcirq.qsim_cuda"))
     monkeypatch.setattr(qsimcirq, "_import_errors", {})
-    _set_probe(monkeypatch, _healthy_probe(custatevec_found=False))
+    monkeypatch.delattr(qsim_decide, "gpu_probe", raising=False)
     options = qsimcirq.QSimOptions(use_gpu=True, gpu_mode=1)
     with pytest.raises(ValueError) as excinfo:
         qsimcirq.QSimSimulator(qsim_options=options)
