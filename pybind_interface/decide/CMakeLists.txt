@@ -15,9 +15,6 @@
 cmake_minimum_required(VERSION 3.28)
 project(qsim LANGUAGES CXX)
 
-include(CheckLanguage)
-check_language(CUDA)
-
 if(MSVC)
     add_compile_options(/openmp)
 else()
@@ -43,41 +40,17 @@ set(CMAKE_CXX_STANDARD 17)
 
 include(../GetPybind11.cmake)
 
-# Configure based on the detected platform
-if(CMAKE_CUDA_COMPILER)
-    include(../GetCUDAARCHS.cmake)
-    add_library(qsim_decide MODULE decide.cpp)
-    if(DEFINED ENV{CUQUANTUM_ROOT})
-        target_compile_options(qsim_decide PRIVATE
-            $<$<COMPILE_LANGUAGE:CUDA>:-D__CUSTATEVEC__>
-        )
-	target_compile_options(qsim_decide PRIVATE
-            $<$<COMPILE_LANGUAGE:CUDA>:-D__CUSTATEVECEX__>
-        )
-    endif()
-    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter Development)
-    include_directories(${PYTHON_INCLUDE_DIRS} ${pybind11_SOURCE_DIR}/include)
-    set_target_properties(qsim_decide PROPERTIES
-        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
-        PREFIX "${PYTHON_MODULE_PREFIX}"
-        SUFFIX "${PYTHON_MODULE_EXTENSION}"
-    )
-    set_source_files_properties(decide.cpp PROPERTIES LANGUAGE CUDA)
-
-elseif(has_hipcc)
-    list(APPEND CMAKE_MODULE_PATH "/opt/rocm/lib/cmake/hip")
-    find_package(HIP REQUIRED)
-    hip_add_library(qsim_decide MODULE decide.cpp)
-    set_source_files_properties(decide.cpp PROPERTIES LANGUAGE HIP)
-    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter Development)
-    include_directories(${PYTHON_INCLUDE_DIRS} ${pybind11_SOURCE_DIR}/include)
-    set_target_properties(qsim_decide PROPERTIES
-        PREFIX "${PYTHON_MODULE_PREFIX}"
-        SUFFIX "${PYTHON_MODULE_EXTENSION}"
-    )
-
-else()
-    pybind11_add_module(qsim_decide decide.cpp)
-endif()
+# qsim_decide is a plain C++ module on every platform. It detects GPU support
+# at runtime by dlopen()-ing the NVIDIA driver and CUDA libraries (see
+# decide.cpp), so it must never be compiled by nvcc/hipcc and must not link
+# against any CUDA library, even when a CUDA compiler is available.
+pybind11_add_module(qsim_decide decide.cpp)
 
 target_link_libraries(qsim_decide PRIVATE qsim_openmp_config)
+
+# dlopen()/dlsym() live in libdl on glibc versions older than 2.34.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(qsim_decide PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# QSIM_WHEEL_RPATH is applied by pybind_interface/cmake/qsim_wheel_rpath.cmake (WP2)

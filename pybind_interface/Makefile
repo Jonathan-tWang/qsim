@@ -54,6 +54,15 @@ PYBINDFLAGS_SSE = -msse4 $(PYBINDFLAGS)
 PYBINDFLAGS_AVX2 = -mavx2 -mfma $(PYBINDFLAGS)
 PYBINDFLAGS_AVX512 = -mavx512f -mbmi2 $(PYBINDFLAGS)
 
+# The flags for the compilation of the qsim_decide module. It is always a plain
+# C++ module that probes for GPU support at runtime with dlopen(); glibc
+# versions older than 2.34 keep dlopen() in libdl.
+ifeq ($(shell uname -s),Linux)
+    PYBINDFLAGS_DECIDE = $(PYBINDFLAGS_BASIC) -ldl
+else
+    PYBINDFLAGS_DECIDE = $(PYBINDFLAGS_BASIC)
+endif
+
 # The flags for the compilation of CUDA-specific Pybind11 interfaces
 PYBINDFLAGS_CUDA = -std=c++17 -x cu -Xcompiler "-Wall -shared -fPIC $(PYBIND_INCLUDES)"
 
@@ -87,18 +96,20 @@ pybind-cpu:
 	$(CXX) avx2/pybind_main_avx2.cpp -o $(QSIMLIB_AVX2) $(CXXFLAGS) $(PYBINDFLAGS_AVX2)
 	$(CXX) avx512/pybind_main_avx512.cpp -o $(QSIMLIB_AVX512) $(CXXFLAGS) $(PYBINDFLAGS_AVX512)
 
+# qsim_decide detects GPU support at runtime, so it is built the same way
+# regardless of which compilers are available; decide-cuda, decide-custatevec
+# and decide-hip are kept as aliases of decide-cpu for existing invocations.
 .PHONY: decide-cpu
 decide-cpu:
 	echo "building decide-cpu"
-	$(CXX) decide/decide.cpp -o $(QSIMLIB_DECIDE) $(CXXFLAGS) $(PYBINDFLAGS_BASIC)
+	$(CXX) decide/decide.cpp -o $(QSIMLIB_DECIDE) $(CXXFLAGS) $(PYBINDFLAGS_DECIDE)
 
 .PHONY: pybind-cuda
 pybind-cuda:
 	$(NVCC) cuda/pybind_main_cuda.cpp -o $(QSIMLIB_CUDA) $(NVCCFLAGS) $(PYBINDFLAGS_CUDA)
 
 .PHONY: decide-cuda
-decide-cuda:
-	$(NVCC) decide/decide.cpp -o $(QSIMLIB_DECIDE) $(NVCCFLAGS) $(PYBINDFLAGS_CUDA)
+decide-cuda: decide-cpu
 
 .PHONY: pybind-custatevec
 pybind-custatevec:
@@ -109,8 +120,7 @@ pybind-custatevecex:
 	$(NVCC) custatevecex/pybind_main_custatevecex.cpp -o $(QSIMLIB_CUSTATEVECEX) $(NVCCFLAGS) $(PYBINDFLAGS_CUSTATEVEC)
 
 .PHONY: decide-custatevec
-decide-custatevec:
-	$(NVCC) decide/decide.cpp -D__CUSTATEVEC__ -D__CUSTATEVECEX__ -o $(QSIMLIB_DECIDE) $(NVCCFLAGS) $(PYBINDFLAGS_CUDA)
+decide-custatevec: decide-cpu
 
 .PHONY: pybind-hip
 pybind-hip:
@@ -121,8 +131,7 @@ pybind-hip:
 	$(HIPCC) hip/pybind_main_hip.cpp -o $(QSIMLIB_HIP) $(HIPCCFLAGS) $(PYBINDFLAGS_HIP)
 
 .PHONY: decide-hip
-decide-hip:
-	$(HIPCC) decide/decide.cpp -o $(QSIMLIB_DECIDE) $(HIPCCFLAGS) $(PYBINDFLAGS_HIP)
+decide-hip: decide-cpu
 
 .PHONY: clean
 clean:
