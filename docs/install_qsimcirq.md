@@ -32,12 +32,22 @@ pip install --group dev
 ## Linux installation
 
 We provide `qsimcirq` Python wheels on 64-bit `x86` architectures with
-`Python 3.{10,11,12,13}`. The installation process will automatically check for
-CUDA and GPUs on your computer if they exist and attempt to build a version of
-qsim that can make use of the GPU(s). (Note that this is presently an
-installation-time action and will take several minutes to finish.)
+`Python 3.{10,11,12,13}`. The wheels include the GPU simulator modules, which
+are enabled at import time when a compatible NVIDIA driver (release 525 or
+newer, i.e. CUDA 12 capable) and the CUDA 12 runtime libraries are present;
+otherwise `qsimcirq` falls back to the CPU simulator. Nothing is compiled at
+installation time.
 
-Simply run `pip3 install qsimcirq`.
+Simply run `pip3 install qsimcirq` for the CPU-only installation. To also
+install the CUDA 12 runtime, cuBLAS and cuStateVec libraries that the GPU
+modules need, install the `cuda12` extra instead:
+
+```shell
+pip3 install "qsimcirq[cuda12]"
+```
+
+The extra is restricted to Linux x86_64 by environment markers, so it is a
+no-op on any other platform.
 
 ## MacOS installation
 
