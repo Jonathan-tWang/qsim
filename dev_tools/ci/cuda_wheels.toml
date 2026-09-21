@@ -1,0 +1,29 @@
+# Copyright 2026 Google LLC
+# SPDX-License-Identifier: Apache-2.0
+
+# Opt in with: python -m cibuildwheel --platform linux \
+#   --config-file dev_tools/ci/cuda_wheels.toml --output-dir wheelhouse
+[tool.cibuildwheel]
+build = "cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64"
+archs = ["x86_64"]
+dependency-versions = "latest"
+before-all = "bash {project}/dev_tools/ci/cuda_before_all.sh"
+before-build = "python -m pip install 'packaging>=23'"
+test-requires = ["pytest"]
+# This container has the build toolkit but no GPU. The separate runtime job
+# validates the installed wheel in clean environments with and without extras.
+test-command = "python -m pytest --import-mode=importlib -v {package}/qsimcirq_tests/gpu_wheel_test.py"
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+repair-wheel-command = "bash {project}/dev_tools/ci/cuda_repair_wheel.sh {wheel} {dest_dir} {project}"
+
+[tool.cibuildwheel.linux.environment]
+PIP_PREFER_BINARY = "1"
+PATH = "/usr/local/cuda-12.9/bin:$PATH"
+CUQUANTUM_ROOT = "/opt/qsim-cuda12/cuquantum"
+CMAKE_ARGS = "-DQSIM_WHEEL_RPATH=ON -DCMAKE_CUDA_FLAGS=--no-compress"
+# SASS for Turing through Blackwell; PTX for future compatible devices.
+CUDAARCHS = "75-real;80-real;86-real;89-real;90-real;100-real;120-real;120-virtual"
+# CUDA 12.9 supports GCC up to 14; manylinux's default compiler may be newer.
+CUDAHOSTCXX = "/usr/bin/g++"

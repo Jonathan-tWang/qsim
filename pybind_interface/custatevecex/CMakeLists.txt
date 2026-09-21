@@ -46,24 +46,9 @@ include_directories(${pybind11_INCLUDE_DIRS})
 # cuBLAS comes from the CUDA toolkit that provides nvcc.
 find_package(CUDAToolkit REQUIRED)
 
-# cuStateVec comes from CUQUANTUM_ROOT, which may be either the cuQuantum SDK
-# layout (lib/libcustatevec.so -> libcustatevec.so.1) or the custatevec-cu12
-# pip wheel layout (<site-packages>/cuquantum, which only ships the versioned
-# libcustatevec.so.1). Look there first, then in the default library paths.
-include_directories($ENV{CUQUANTUM_ROOT}/include)
-find_library(QSIM_CUSTATEVEC_LIBRARY
-    NAMES custatevec libcustatevec.so.1
-    PATHS $ENV{CUQUANTUM_ROOT}/lib $ENV{CUQUANTUM_ROOT}/lib64
-    NO_DEFAULT_PATH
-)
-find_library(QSIM_CUSTATEVEC_LIBRARY NAMES custatevec libcustatevec.so.1)
-if(NOT QSIM_CUSTATEVEC_LIBRARY)
-    message(FATAL_ERROR "${MSG_PREFIX} could not find the cuStateVec library "
-        "(libcustatevec.so or libcustatevec.so.1). Set CUQUANTUM_ROOT to the "
-        "cuQuantum SDK directory or to the custatevec-cu12 wheel directory "
-        "(<site-packages>/cuquantum). Searched $ENV{CUQUANTUM_ROOT}/lib, "
-        "$ENV{CUQUANTUM_ROOT}/lib64 and the default library paths.")
-endif()
+include_directories("$ENV{CUQUANTUM_ROOT}/include")
+include(../cmake/qsim_custatevec.cmake)
+qsim_find_custatevec(QSIM_CUSTATEVEC_LIBRARY)
 message(STATUS "${MSG_PREFIX} found cuStateVec library "
                "${QSIM_CUSTATEVEC_LIBRARY}")
 

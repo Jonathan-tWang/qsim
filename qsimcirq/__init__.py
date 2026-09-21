@@ -19,8 +19,10 @@ from qsimcirq import qsim_decide
 
 # ImportError messages from loading the optional GPU modules, keyed by module
 # name ("qsim_cuda", "qsim_hip", "qsim_custatevec", "qsim_custatevecex").
-# Read by qsimcirq.gpu_status(); private otherwise.
+# Read by the private diagnostics appended to QSimSimulator errors.
 _import_errors: dict[str, str] = {}
+_missing_modules: set[str] = set()
+_gpu_backend = "cuda"
 
 
 def _load_simd_qsim():
@@ -37,46 +39,38 @@ def _load_simd_qsim():
 
 
 def _try_import(name: str):
-    """Import `qsimcirq.<name>`; on ImportError record the message and return None.
-
-    The GPU modules are optional: a missing shared library (e.g. libcudart.so.12
-    or libcustatevec.so.1) or a CPU-only build must not break `import qsimcirq`.
-    `qsimcirq.gpu_status()` reports the recorded message as the reason.
-    """
+    """Load an optional backend and preserve the loader's diagnostic on failure."""
+    qualified_name = f"qsimcirq.{name}"
+    _import_errors.pop(name, None)
+    _missing_modules.discard(name)
     try:
-        return importlib.import_module(f"qsimcirq.{name}")
-    except ImportError as e:
-        _import_errors[name] = str(e)
+        return importlib.import_module(qualified_name)
+    except ImportError as error:
+        _import_errors[name] = str(error)
+        # Distinguish an absent extension from one with missing dependencies.
+        if isinstance(error, ModuleNotFoundError) and error.name == qualified_name:
+            _missing_modules.add(name)
         return None
 
 
 def _load_qsim_gpu():
-    instr = qsim_decide.detect_gpu()
-    if instr == 0:
-        qsim_gpu = _try_import("qsim_cuda")
-    elif instr == 3:
-        qsim_gpu = _try_import("qsim_hip")
-    else:
-        qsim_gpu = None
-    return qsim_gpu
+    global _gpu_backend
+    # A HIP installation keeps its backend preference even if a dependency is
+    # missing, including on machines that also have an NVIDIA driver installed.
+    hip = _try_import("qsim_hip")
+    if "qsim_hip" not in _missing_modules:
+        _gpu_backend = "hip"
+        return hip
+    _gpu_backend = "cuda"
+    return _try_import("qsim_cuda")
 
 
 def _load_qsim_custatevec():
-    instr = qsim_decide.detect_custatevec()
-    if instr == 1:
-        qsim_custatevec = _try_import("qsim_custatevec")
-    else:
-        qsim_custatevec = None
-    return qsim_custatevec
+    return None if _gpu_backend == "hip" else _try_import("qsim_custatevec")
 
 
 def _load_qsim_custatevecex():
-    instr = qsim_decide.detect_custatevecex()
-    if instr == 2:
-        qsim_custatevecex = _try_import("qsim_custatevecex")
-    else:
-        qsim_custatevecex = None
-    return qsim_custatevecex
+    return None if _gpu_backend == "hip" else _try_import("qsim_custatevecex")
 
 
 qsim = _load_simd_qsim()
@@ -88,7 +82,6 @@ qsim_custatevecex = _load_qsim_custatevecex()
 
 from qsimcirq._version import __version__
 
-from ._gpu_status import GpuStatus, gpu_status
 from .qsim_circuit import QSimCircuit, add_op_to_circuit, add_op_to_opstring
 from .qsim_simulator import QSimOptions, QSimSimulator
 from .qsimh_simulator import QSimhSimulator
@@ -104,7 +97,5 @@ __all__ = [
     "qsim_gpu",
     "qsim_custatevec",
     "qsim_custatevecex",
-    "gpu_status",
-    "GpuStatus",
     "__version__",
 ]

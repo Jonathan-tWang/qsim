@@ -31,7 +31,7 @@
 #  [project.optional-dependencies]: optional extras that users opt into with
 #  "pip install qsimcirq[<extra>]". Stored in the package metadata. The "cuda12"
 #  extra pulls in the NVIDIA CUDA 12 runtime, cuBLAS and cuStateVec wheels that
-#  the GPU modules in the Linux x86_64 wheels link against at run time.
+#  the modules built by dev_tools/ci/cuda_wheels.toml use at run time.
 
 [build-system]
 build-backend = "setuptools.build_meta"
@@ -97,14 +97,14 @@ issues = "https://github.com/quantumlib/qsim/issues"
 source = "https://github.com/quantumlib/qsim"
 
 [project.optional-dependencies]
-# GPU support (CUDA 12) for the Linux x86_64 wheels. The environment markers
-# make this extra a no-op on every other platform, so "pip install
-# qsimcirq[cuda12]" is always safe to run. cuStateVec 1.10 is the first
-# release with the Ex API used by qsim_custatevecex. See issue #601.
+# Runtime libraries for the opt-in Linux x86_64 GPU wheel build. This extra
+# does not add GPU extensions to an existing CPU-only wheel. The markers
+# make this extra a no-op on every other platform. cuStateVec 1.11 is the first
+# release with the distributed Ex API used by qsim_custatevecex. See issue #601.
 cuda12 = [
   "nvidia-cuda-runtime-cu12>=12.0,<13; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "nvidia-cublas-cu12>=12.0,<13;       sys_platform == 'linux' and platform_machine == 'x86_64'",
-  "custatevec-cu12>=1.10,<2;           sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "custatevec-cu12>=1.11,<2;           sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [dependency-groups]
@@ -140,10 +140,8 @@ version = {attr = "qsimcirq._version.__version__"}
 # in setuptools' setup.py. "pip install qsim" installs these automatically.
 dependencies = {file = ["requirements.txt"] }
 
-# Note (issue #601): the Linux x86_64 GPU wheel build (nvcc in the manylinux
-# image, CUDAARCHS, -DQSIM_WHEEL_RPATH=ON via CMAKE_ARGS, and a wheel test that
-# installs the "cuda12" extra) is added as a [[tool.cibuildwheel.overrides]]
-# entry by work package WP5; the settings below are the CPU-only configuration.
+# The CUDA wheel configuration is opt-in; see dev_tools/ci/cuda_wheels.toml.
+# The default release configuration remains independent of CUDA.
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
 dependency-versions = "latest"

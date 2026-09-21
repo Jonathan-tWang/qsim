@@ -1,0 +1,102 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This workflow is deliberately opt-in while CUDA wheels are evaluated. It
+# builds the same source tree as the normal wheel workflow, with the separate
+# CUDA configuration in dev_tools/ci/cuda_wheels.toml.
+name: Build CUDA 12 Python wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        description: 'cibuildwheel selector (must include cp312 for runtime test)'
+        type: string
+        default: >-
+          cp310-manylinux_x86_64 cp311-manylinux_x86_64
+          cp312-manylinux_x86_64 cp313-manylinux_x86_64
+          cp314-manylinux_x86_64
+
+permissions:
+  contents: read
+
+jobs:
+  build-wheels:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install wheel builder
+        run: python -m pip install cibuildwheel
+
+      - name: Build and inspect CUDA wheels
+        env:
+          CIBW_BUILD: ${{inputs.build}}
+          CIBW_BUILD_VERBOSITY: 1
+          CMAKE_BUILD_PARALLEL_LEVEL: 4
+        run: >-
+          python -m cibuildwheel
+          --platform linux
+          --config-file dev_tools/ci/cuda_wheels.toml
+          --output-dir wheelhouse
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: qsimcirq-cuda12-wheels
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  driverless-runtime-test:
+    needs: build-wheels
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Download wheels
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: qsimcirq-cuda12-wheels
+          path: wheelhouse
+
+      - name: Test CPU fallback and CUDA library resolution
+        run: |
+          shopt -s nullglob
+          wheels=(wheelhouse/*cp312*manylinux_2_28_x86_64.whl)
+          if (( ${#wheels[@]} != 1 )); then
+            echo "Expected one CPython 3.12 wheel, found ${#wheels[@]}" >&2
+            exit 1
+          fi
+          bash dev_tools/ci/cuda_test_wheel.sh "${wheels[0]}"

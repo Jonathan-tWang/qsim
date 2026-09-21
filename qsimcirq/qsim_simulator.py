@@ -22,7 +22,7 @@ import numpy as np
 import qsimcirq.qsim_circuit as qsimc
 
 from . import qsim, qsim_custatevec, qsim_custatevecex, qsim_gpu
-from ._gpu_status import custatevec_reason, gpu_status
+from ._gpu_status import gpu_backend_reason
 
 
 # This should probably live in Cirq...
@@ -43,15 +43,8 @@ def _needs_trajectories(circuit: cirq.Circuit) -> bool:
 
 
 def _with_gpu_reason(message: str, gpu_mode: int = 0) -> str:
-    """Append why GPU support (or the cuStateVec backend) is unavailable.
-
-    Uses `qsimcirq.gpu_status().reason`; when that is `None` because the CUDA
-    backend itself loaded, falls back to `custatevec_reason(gpu_mode)` for the
-    cuStateVec / cuStateVecEx modes.
-    """
-    reason = gpu_status().reason
-    if reason is None and gpu_mode != 0:
-        reason = custatevec_reason(gpu_mode)
+    """Append the import diagnostic for the requested backend."""
+    reason = gpu_backend_reason(gpu_mode)
     return message if reason is None else f"{message} {reason}"
 
 

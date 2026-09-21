@@ -22,10 +22,10 @@ check_language(CUDA)
 # easier to figure out what came from where in the logs.
 set(MSG_PREFIX "[qsim cmake configuration]")
 
-# Opt-in for wheel builds only: link the GPU modules (and qsim_decide) with a
-# relocatable $ORIGIN RPATH that resolves to the NVIDIA pip wheels installed
-# next to qsimcirq. cibuildwheel enables it with CMAKE_ARGS=-DQSIM_WHEEL_RPATH=ON
-# and local builds leave it OFF; see pybind_interface/cmake/qsim_wheel_rpath.cmake.
+# Opt-in for wheel builds only: link the GPU modules with a relocatable $ORIGIN
+# RPATH that resolves to the NVIDIA pip wheels installed next to qsimcirq.
+# cibuildwheel enables it with CMAKE_ARGS=-DQSIM_WHEEL_RPATH=ON and local builds
+# leave it OFF; see pybind_interface/cmake/qsim_wheel_rpath.cmake.
 option(QSIM_WHEEL_RPATH
        "Link GPU modules with a relocatable RPATH for the NVIDIA pip wheels"
        OFF)
@@ -44,22 +44,35 @@ else()
 endif()
 
 if(CMAKE_CUDA_COMPILER)
-    # Link the CUDA runtime dynamically (NEEDED libcudart.so.12) rather than
-    # CMake's default libcudart_static.a, so that the wheels can pick up the
-    # runtime from the nvidia-cuda-runtime-cu12 package and local builds use the
-    # toolkit's shared runtime. -DCMAKE_CUDA_RUNTIME_LIBRARY=Static restores the
-    # previous behaviour.
-    if(NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
-        set(CMAKE_CUDA_RUNTIME_LIBRARY Shared CACHE STRING
-            "CUDA runtime library to link against (Static, Shared or None)")
+    # Wheel builds load cudart from nvidia-cuda-runtime-cu12. Source builds
+    # retain CMake's default runtime linkage, including explicit user choices.
+    if(QSIM_WHEEL_RPATH)
+        if(DEFINED CMAKE_CUDA_RUNTIME_LIBRARY
+           AND NOT CMAKE_CUDA_RUNTIME_LIBRARY STREQUAL "Shared")
+            message(FATAL_ERROR "QSIM_WHEEL_RPATH requires the Shared CUDA runtime")
+        endif()
+        set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
     endif()
     enable_language(CUDA)
+    if(QSIM_WHEEL_RPATH)
+        if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux"
+           OR CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12
+           OR NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 13)
+            message(FATAL_ERROR "QSIM_WHEEL_RPATH requires Linux and CUDA 12")
+        endif()
+        if(NOT DEFINED ENV{CUQUANTUM_ROOT} OR "$ENV{CUQUANTUM_ROOT}" STREQUAL "")
+            message(FATAL_ERROR "QSIM_WHEEL_RPATH requires CUQUANTUM_ROOT")
+        endif()
+    endif()
     message(STATUS "${MSG_PREFIX} found CUDA compiler "
                    "${CMAKE_CUDA_COMPILER} ${CMAKE_CUDA_COMPILER_VERSION}")
     message(STATUS "${MSG_PREFIX} CUDA runtime library: "
                    "${CMAKE_CUDA_RUNTIME_LIBRARY}")
     message(STATUS "${MSG_PREFIX} QSIM_WHEEL_RPATH: ${QSIM_WHEEL_RPATH}")
 else()
+    if(QSIM_WHEEL_RPATH)
+        message(FATAL_ERROR "QSIM_WHEEL_RPATH requires a CUDA 12 compiler")
+    endif()
     message(STATUS "${MSG_PREFIX} did not find CUDA compiler")
     # Did not find the CUDA framewwork, so check for the HIP as an alternative.
     execute_process(COMMAND which hipcc

@@ -73,10 +73,10 @@ following command:
 pip install qsimcirq
 ```
 
-On Linux x86_64, GPU (CUDA 12) support is an optional extra installed with
-`pip install "qsimcirq[cuda12]"`; see the
-[installation guide](https://github.com/quantumlib/qsim/blob/main/docs/install_qsimcirq.md)
-for details.
+Linux x86_64 CUDA wheels can be built with the repository's dedicated
+cibuildwheel configuration. Their `cuda12` extra installs the matching NVIDIA
+runtime libraries; see the [installation guide](https://github.com/quantumlib/qsim/blob/main/docs/install_qsimcirq.md)
+for build and installation details.
 
 _Note_: The core qsim library (located in the source repository under the
 [`lib/`](https://github.com/quantumlib/qsim/blob/main/lib) subdirectory) can

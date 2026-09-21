@@ -40,21 +40,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 include(../GetPybind11.cmake)
 
-# qsim_decide is a plain C++ module on every platform. It detects GPU support
-# at runtime by dlopen()-ing the NVIDIA driver and CUDA libraries (see
-# decide.cpp), so it must never be compiled by nvcc/hipcc and must not link
-# against any CUDA library, even when a CUDA compiler is available.
+# Backend availability comes from importing the optional Python extensions.
+# This module needs neither a GPU compiler nor CUDA/ROCm libraries.
 pybind11_add_module(qsim_decide decide.cpp)
-
 target_link_libraries(qsim_decide PRIVATE qsim_openmp_config)
-
-# dlopen()/dlsym() live in libdl on glibc versions older than 2.34.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(qsim_decide PRIVATE ${CMAKE_DL_LIBS})
-endif()
-
-# Opt-in relocatable RPATH for wheel builds (a no-op unless QSIM_WHEEL_RPATH is
-# ON; see pybind_interface/cmake/qsim_wheel_rpath.cmake). qsim_decide dlopen()s
-# the CUDA libraries, and dlopen() searches the calling object's DT_RPATH, so it
-# needs the same entry as the GPU modules.
-qsim_apply_wheel_rpath(qsim_decide)

@@ -32,23 +32,31 @@ pip install --group dev
 ## Linux installation
 
 We provide `qsimcirq` Python wheels on 64-bit `x86` architectures with
-`Python 3.{10,11,12,13}`. Starting with the first release built with GPU support
-(see qsim issue #601), the wheels include the GPU simulator modules, which
-are enabled at import time when a compatible NVIDIA driver (release 525 or
-newer, i.e. CUDA 12 capable) and the CUDA 12 runtime libraries are present;
-otherwise `qsimcirq` falls back to the CPU simulator. Nothing is compiled at
-installation time.
+`Python 3.{10,11,12,13}`. Simply run `pip3 install qsimcirq` for the standard
+installation.
 
-Simply run `pip3 install qsimcirq` for the CPU-only installation. To also
-install the CUDA 12 runtime, cuBLAS and cuStateVec libraries that the GPU
-modules need, install the `cuda12` extra instead:
+CUDA-enabled Linux x86_64 wheels can be produced with the dedicated
+`dev_tools/ci/cuda_wheels.toml` cibuildwheel configuration. Those wheels
+contain the CUDA and cuStateVec extension modules, while NVIDIA's much larger
+runtime libraries remain separate dependencies. Install a CUDA-enabled wheel
+artifact with its `cuda12` extra to supply CUDA 12, cuBLAS, and cuStateVec:
 
 ```shell
-pip3 install "qsimcirq[cuda12]"
+pip3 install "/path/to/qsimcirq-VERSION-cpPYTHON-cpPYTHON-manylinux_2_28_x86_64.whl[cuda12]"
 ```
 
-The extra is restricted to Linux x86_64 by environment markers, so it is a
-no-op on any other platform.
+The extra does not add GPU extensions to a CPU-only wheel. It is restricted to
+Linux x86_64 by environment markers and requires cuStateVec 1.11 or newer.
+The CUDA wheel contains native code for compute capabilities 7.5 through 12.0,
+so it supports Turing and newer NVIDIA GPUs. A compatible NVIDIA driver is
+still required when a simulation is run.
+
+Importing `qsimcirq` does not initialize the GPU or create a CUDA context.
+GPU availability is checked by CUDA when the first GPU simulation runs. A CPU
+simulation continues to work if an optional GPU extension or one of its
+shared-library dependencies cannot be loaded. If a requested extension could
+not load, `QSimSimulator` includes the dynamic loader's error in its existing
+“not supported” exception.
 
 ## MacOS installation
 

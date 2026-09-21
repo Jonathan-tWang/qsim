@@ -54,14 +54,9 @@ PYBINDFLAGS_SSE = -msse4 $(PYBINDFLAGS)
 PYBINDFLAGS_AVX2 = -mavx2 -mfma $(PYBINDFLAGS)
 PYBINDFLAGS_AVX512 = -mavx512f -mbmi2 $(PYBINDFLAGS)
 
-# The flags for the compilation of the qsim_decide module. It is always a plain
-# C++ module that probes for GPU support at runtime with dlopen(); glibc
-# versions older than 2.34 keep dlopen() in libdl.
-ifeq ($(shell uname -s),Linux)
-    PYBINDFLAGS_DECIDE = $(PYBINDFLAGS_BASIC) -ldl
-else
-    PYBINDFLAGS_DECIDE = $(PYBINDFLAGS_BASIC)
-endif
+# Backend discovery uses the installed Python modules, so qsim_decide needs
+# neither a GPU compiler nor CUDA/HIP runtime libraries.
+PYBINDFLAGS_DECIDE = $(PYBINDFLAGS_BASIC)
 
 # The flags for the compilation of CUDA-specific Pybind11 interfaces
 PYBINDFLAGS_CUDA = -std=c++17 -x cu -Xcompiler "-Wall -shared -fPIC $(PYBIND_INCLUDES)"
@@ -96,7 +91,7 @@ pybind-cpu:
 	$(CXX) avx2/pybind_main_avx2.cpp -o $(QSIMLIB_AVX2) $(CXXFLAGS) $(PYBINDFLAGS_AVX2)
 	$(CXX) avx512/pybind_main_avx512.cpp -o $(QSIMLIB_AVX512) $(CXXFLAGS) $(PYBINDFLAGS_AVX512)
 
-# qsim_decide detects GPU support at runtime, so it is built the same way
+# qsim_decide detects imported GPU backends, so it is built the same way
 # regardless of which compilers are available; decide-cuda, decide-custatevec
 # and decide-hip are kept as aliases of decide-cpu for existing invocations.
 .PHONY: decide-cpu
