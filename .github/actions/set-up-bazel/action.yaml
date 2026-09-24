@@ -89,13 +89,19 @@ runs:
       run: |
         if [[ "${{startsWith(runner.os, 'win')}}" == "true" ]]; then
           num_cpus=${NUMBER_OF_PROCESSORS}
+          cpu_isa="win"
+        elif grep -q avx512f /proc/cpuinfo 2>/dev/null; then
+          num_cpus=$(getconf _NPROCESSORS_ONLN)
+          cpu_isa="avx512"
         else
           num_cpus=$(getconf _NPROCESSORS_ONLN)
+          cpu_isa="base"
         fi
         {
         echo "startup --output_base=~/.cache/bazel/output_base"
         echo "build --disk_cache=~/.cache/bazel/disk_cache"
         echo "build --repository_cache=~/.cache/bazel/repository_cache"
         echo "build --jobs=${num_cpus}"
+        echo "build --action_env=QSIM_CPU_ISA=${cpu_isa}"
         echo "test --cache_test_results=no"
         } >> .bazelrc

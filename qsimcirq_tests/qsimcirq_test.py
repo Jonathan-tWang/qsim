@@ -1520,6 +1520,20 @@ def _device_state_to_numpy(device_state):
     return cupy.asnumpy(cupy.asarray(device_state))
 
 
+def _build_asymmetric_entangled_circuit(qubits):
+    """Builds a dense, permutation-asymmetric circuit for state-vector checks."""
+    circuit = cirq.Circuit()
+    for index, qubit in enumerate(qubits):
+        circuit.append(cirq.rx(0.31 * (index + 1)).on(qubit))
+        circuit.append(cirq.ry(0.47 * (index + 1)).on(qubit))
+    for left, right in zip(qubits[:-1], qubits[1:]):
+        circuit.append(cirq.CZ(left, right))
+    for index, qubit in enumerate(qubits):
+        circuit.append(cirq.rz(0.23 * (index + 1)).on(qubit))
+        circuit.append(cirq.H(qubit))
+    return circuit
+
+
 def test_simulate_into_device_array_requires_gpu():
     cpu_sim = qsimcirq.QSimSimulator()
     a, b = cirq.LineQubit.range(2)
@@ -1534,14 +1548,12 @@ def test_cirq_qsim_gpu_simulate_into_device_array():
     pytest.importorskip("cupy")
 
     qubits = cirq.LineQubit.range(5)
-    circuit = cirq.testing.random_circuit(
-        qubits, n_moments=10, op_density=1.0, random_state=11
-    )
+    circuit = _build_asymmetric_entangled_circuit(qubits)
 
     gpu_options = qsimcirq.QSimOptions(use_gpu=True)
     sim = qsimcirq.QSimSimulator(qsim_options=gpu_options)
 
-    _, device_state, _ = sim.simulate_into_device_array(circuit)
+    _, device_state, qubit_order = sim.simulate_into_device_array(circuit)
 
     interface = device_state.__cuda_array_interface__
     assert interface["shape"] == (2 ** len(qubits),)
@@ -1552,7 +1564,9 @@ def test_cirq_qsim_gpu_simulate_into_device_array():
     assert interface["data"][1] is False
     assert device_state.num_qubits == len(qubits)
 
-    expected = sim.simulate(circuit).final_state_vector
+    expected = (
+        cirq.Simulator().simulate(circuit, qubit_order=qubit_order).final_state_vector
+    )
     actual = _device_state_to_numpy(device_state)
     assert np.allclose(actual, expected, atol=1e-6)
 
@@ -1662,16 +1676,16 @@ def test_cirq_qsim_custatevec_simulate_into_device_array():
     pytest.importorskip("cupy")
 
     qubits = cirq.LineQubit.range(5)
-    circuit = cirq.testing.random_circuit(
-        qubits, n_moments=10, op_density=1.0, random_state=11
-    )
+    circuit = _build_asymmetric_entangled_circuit(qubits)
 
     custatevec_options = qsimcirq.QSimOptions(use_gpu=True, gpu_mode=1)
     sim = qsimcirq.QSimSimulator(qsim_options=custatevec_options)
 
-    _, device_state, _ = sim.simulate_into_device_array(circuit)
+    _, device_state, qubit_order = sim.simulate_into_device_array(circuit)
 
-    expected = sim.simulate(circuit).final_state_vector
+    expected = (
+        cirq.Simulator().simulate(circuit, qubit_order=qubit_order).final_state_vector
+    )
     actual = _device_state_to_numpy(device_state)
     assert np.allclose(actual, expected, atol=1e-6)
 
@@ -1682,14 +1696,12 @@ def test_cirq_qsim_custatevecex_simulate_into_device_array():
     cupy = pytest.importorskip("cupy")
 
     qubits = cirq.LineQubit.range(5)
-    circuit = cirq.testing.random_circuit(
-        qubits, n_moments=10, op_density=1.0, random_state=11
-    )
+    circuit = _build_asymmetric_entangled_circuit(qubits)
 
     custatevecex_options = qsimcirq.QSimOptions(use_gpu=True, gpu_mode=2)
     sim = qsimcirq.QSimSimulator(qsim_options=custatevecex_options)
 
-    _, device_state, _ = sim.simulate_into_device_array(circuit)
+    _, device_state, qubit_order = sim.simulate_into_device_array(circuit)
 
     if cupy.cuda.runtime.getDeviceCount() > 1:
         # With gpu_mode=2, cuStateVecEx spreads the state across all visible
@@ -1697,7 +1709,11 @@ def test_cirq_qsim_custatevecex_simulate_into_device_array():
         with pytest.raises(RuntimeError, match="no single contiguous device buffer"):
             _ = device_state.__cuda_array_interface__
     else:
-        expected = sim.simulate(circuit).final_state_vector
+        expected = (
+            cirq.Simulator()
+            .simulate(circuit, qubit_order=qubit_order)
+            .final_state_vector
+        )
         actual = _device_state_to_numpy(device_state)
         assert np.allclose(actual, expected, atol=1e-6)
 

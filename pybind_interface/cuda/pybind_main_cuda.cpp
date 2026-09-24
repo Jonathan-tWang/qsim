@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Enable zero-copy device state-vector bindings (issue #836).
+// Must precede the header include below: pybind_main.h branches on
+// this macro and would otherwise emit a conflicting inline stub.
+#define QSIM_DEVICE_STATE_BINDINGS
+
 #include "pybind_main_cuda.h"
 
 #include "../../lib/fuser_mqubit.h"
@@ -53,8 +58,5 @@ namespace qsim {
   inline void SetFlushToZeroAndDenormalsAreZeros() {}
   inline void ClearFlushToZeroAndDenormalsAreZeros() {}
 }
-
-// Enable zero-copy device state-vector bindings (issue #836).
-#define QSIM_DEVICE_STATE_BINDINGS
 
 #include "../pybind_main.cpp"

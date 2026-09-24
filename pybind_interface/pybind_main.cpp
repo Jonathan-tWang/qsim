@@ -459,6 +459,36 @@ struct Releaser<false> {
   }
 };
 
+namespace {
+
+#ifdef __NVCC__
+// Saves the caller's active CUDA device on entry and restores it on scope
+// exit; optionally switches to a specific target device for the duration of
+// the scope. This prevents multi-device backends (such as cuStateVecEx, which
+// calls cudaSetDevice across devices without restoring the original device)
+// from leaking a changed current device to the Python process, and ensures
+// device-state operations (normal-order conversion and deallocation) always
+// execute on the device that owns the allocation.
+struct ScopedCudaDevice {
+  int prev_device = -1;
+
+  explicit ScopedCudaDevice(int target_device = -1) {
+    if (cudaGetDevice(&prev_device) != cudaSuccess) {
+      prev_device = -1;
+    }
+    if (target_device >= 0 && target_device != prev_device) {
+      cudaSetDevice(target_device);
+    }
+  }
+
+  ~ScopedCudaDevice() {
+    if (prev_device >= 0) {
+      cudaSetDevice(prev_device);
+    }
+  }
+};
+#endif
+
 // Helper class for simulating circuits of all types.
 class SimulatorHelper {
  public:
@@ -471,6 +501,14 @@ class SimulatorHelper {
   using State = StateSpace::State;
 
   SimulatorHelper() = delete;
+
+  ~SimulatorHelper() {
+#ifdef __NVCC__
+    ScopedCudaDevice guard(owning_device_);
+#endif
+    state = StateSpace::Null();
+    scratch = StateSpace::Null();
+  }
 
   template <typename StateType>
   static py::array_t<float> simulate_fullstate(
@@ -607,7 +645,24 @@ class SimulatorHelper {
         !helper->simulate(input_state)) {
       return nullptr;
     }
+    // Convert to normal (interleaved complex) order and synchronize eagerly
+    // on the device that owns the state, so subsequent reads via
+    // __cuda_array_interface__ require no device work and remain safe even
+    // if the caller has switched to a different active CUDA device.
+    helper->ensure_normal_order();
     return helper;
+  }
+
+  void ensure_normal_order() {
+    if (!normal_order_done_ && state.device_ptr() != nullptr) {
+#ifdef __NVCC__
+      ScopedCudaDevice guard(owning_device_);
+#endif
+      StateSpace state_space = factory.CreateStateSpace();
+      state_space.InternalToNormalOrder(state);
+      StateSpace::DeviceSync();
+      normal_order_done_ = true;
+    }
   }
 
   // Returns the device pointer to the final state vector, converting the
@@ -621,12 +676,7 @@ class SimulatorHelper {
     if (ptr == nullptr) {
       return nullptr;
     }
-    if (!normal_order_done_) {
-      StateSpace state_space = factory.CreateStateSpace();
-      state_space.InternalToNormalOrder(state);
-      StateSpace::DeviceSync();
-      normal_order_done_ = true;
-    }
+    ensure_normal_order();
     // Re-query in case the reorder relocated the buffer.
     return state.device_ptr();
   }
@@ -641,6 +691,10 @@ class SimulatorHelper {
       : factory(Factory(options)),
         state(StateSpace::Null()),
         scratch(StateSpace::Null()) {
+#ifdef __NVCC__
+    ScopedCudaDevice restore_caller_device;
+    owning_device_ = restore_caller_device.prev_device;
+#endif
     bool denormals_are_zeros;
     is_valid = false;
     is_noisy = noisy;
@@ -677,12 +731,18 @@ class SimulatorHelper {
   }
 
   void init_state(uint64_t input_state) {
+#ifdef __NVCC__
+    ScopedCudaDevice guard(owning_device_);
+#endif
     StateSpace state_space = factory.CreateStateSpace();
     state_space.SetAllZeros(state);
     state_space.SetAmpl(state, input_state, 1, 0);
   }
 
   void init_state(const py::array_t<float> &input_vector) {
+#ifdef __NVCC__
+    ScopedCudaDevice guard(owning_device_);
+#endif
     StateSpace state_space = factory.CreateStateSpace();
     uint64_t size = 2 * (uint64_t{1} << state.num_qubits());
     if (size < state_space.MinSize(state.num_qubits())) {
@@ -709,6 +769,9 @@ class SimulatorHelper {
 
   template <typename StateType>
   bool simulate(const StateType& input_state) {
+#ifdef __NVCC__
+    ScopedCudaDevice guard(owning_device_);
+#endif
     init_state(input_state);
     bool result = false;
 
@@ -729,6 +792,9 @@ class SimulatorHelper {
   }
 
   bool simulate_subcircuit(uint64_t begin, uint64_t end) {
+#ifdef __NVCC__
+    ScopedCudaDevice guard(owning_device_);
+#endif
     bool result = false;
 
     if (is_noisy) {
@@ -757,11 +823,17 @@ class SimulatorHelper {
   }
 
   std::vector<uint64_t> sample(uint64_t num_samples) {
+#ifdef __NVCC__
+    ScopedCudaDevice guard(owning_device_);
+#endif
     StateSpace state_space = factory.CreateStateSpace();
     return state_space.Sample(state, num_samples, seed);
   }
 
   py::array_t<float> release_state_to_python() {
+#ifdef __NVCC__
+    ScopedCudaDevice guard(owning_device_);
+#endif
     StateSpace state_space = factory.CreateStateSpace();
     state_space.InternalToNormalOrder(state);
     uint64_t fsv_size = 2 * (uint64_t{1} << num_qubits);
@@ -773,6 +845,9 @@ class SimulatorHelper {
   std::vector<std::complex<double>> get_expectation_value(
       const std::vector<std::tuple<std::vector<OpString<float>>,
                                    unsigned>>& opsums_and_qubit_counts) {
+#ifdef __NVCC__
+    ScopedCudaDevice guard(owning_device_);
+#endif
     Simulator simulator = factory.CreateSimulator();
     StateSpace state_space = factory.CreateStateSpace();
     using Fuser = MultiQubitGateFuser<IO>;
@@ -820,6 +895,10 @@ class SimulatorHelper {
   // Only set to "true" once initialization is complete.
   bool is_valid;
 
+#ifdef __NVCC__
+  int owning_device_ = -1;
+#endif
+
 #ifdef QSIM_DEVICE_STATE_BINDINGS
   // Once set, the internal state layout has been irreversibly mutated to
   // normal order (for the native CUDA backend); the state must not be used
@@ -834,20 +913,26 @@ class SimulatorHelper {
 // exposes it through the CUDA Array Interface (version 3), so that libraries
 // such as CuPy, Numba and PyTorch can consume the state without copying it
 // to the host. See https://github.com/quantumlib/qsim/issues/836.
-class DeviceStateVector {
+//
+// Parameterized on Factory::Simulator and placed in the anonymous namespace so
+// that each compiled backend extension (qsim_cuda, qsim_custatevec,
+// qsim_custatevecex, qsim_hip) produces a distinct, internal-linkage C++
+// std::type_info and pybind11 never conflates instances across modules.
+template <typename SimulatorTag = Factory::Simulator>
+class DeviceStateVectorImpl {
  public:
-  explicit DeviceStateVector(std::unique_ptr<SimulatorHelper> helper)
+  explicit DeviceStateVectorImpl(std::unique_ptr<SimulatorHelper> helper)
       : helper_(std::move(helper)) {}
 
   template <typename StateType>
-  static std::unique_ptr<DeviceStateVector> simulate(
+  static std::unique_ptr<DeviceStateVectorImpl> simulate(
       const py::dict &options, bool is_noisy, const StateType& input_state) {
     auto helper = SimulatorHelper::simulate_fullstate_device(
         options, is_noisy, input_state);
     if (helper == nullptr) {
       throw std::runtime_error("qsim simulation errored out.");
     }
-    return std::make_unique<DeviceStateVector>(std::move(helper));
+    return std::make_unique<DeviceStateVectorImpl>(std::move(helper));
   }
 
   unsigned num_qubits() const {
@@ -899,11 +984,21 @@ class DeviceStateVector {
   std::unique_ptr<SimulatorHelper> helper_;
 };
 
+using DeviceStateVector = DeviceStateVectorImpl<Factory::Simulator>;
+
+#endif
+
+}  // namespace
+
+#ifdef QSIM_DEVICE_STATE_BINDINGS
+
 void bind_device_state_vector(py::module_& m) {
   // module_local: several GPU modules (e.g. qsim_cuda and qsim_custatevec)
-  // are loaded into the same process and each registers this class; without
-  // it, pybind11's shared type registry rejects the second registration and
-  // `import qsimcirq` fails. Instances never cross modules.
+  // may be loaded into the same process and each registers DeviceStateVector;
+  // combined with DeviceStateVectorImpl<Factory::Simulator> in the anonymous
+  // namespace (internal linkage + distinct mangled typeinfo per backend),
+  // pybind11 isolates both type registration and instance type-checking across
+  // extension modules.
   py::class_<DeviceStateVector>(
       m, "DeviceStateVector", py::module_local(),
       "Final state vector of a simulation, held in device (GPU) memory. "
